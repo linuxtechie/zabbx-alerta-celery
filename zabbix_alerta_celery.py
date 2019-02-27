@@ -18,7 +18,7 @@ from zabbix_celery import send2celery
 
 __version__ = '0.0.1'
 
-LOG_FILE = '/var/log/zabbix/zabbix_alerta.log'
+LOG_FILE = '/var/log/zabbix/zabbix_alerta_celery.log'
 LOG_FORMAT = "%(asctime)s.%(msecs).03d %(name)s[%(process)d] %(threadName)s %(levelname)s - %(message)s"
 LOG_DATE_FMT = "%Y-%m-%d %H:%M:%S"
 

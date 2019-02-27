@@ -12,7 +12,8 @@ setup(
     author_email='veeresh@khanorkar.com',
     packages=find_packages(),
     py_modules=[
-        'zabbix_alerta_celery'
+        'zabbix_alerta_celery', 
+        'zabbix_celery'
     ],
     install_requires=[
         'celery',
