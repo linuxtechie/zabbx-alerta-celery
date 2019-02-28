@@ -4,7 +4,7 @@ from celery import Celery
 from celery.utils.log import get_task_logger
 from alertaclient.api import Client
 
-celeryApp = Celery('zabbix--alerta-celery', broker='amqp://alerta:alerta@localhost//')
+celeryApp = Celery('zabbix-celery', broker='amqp://alerta:alerta@localhost//')
 
 log = get_task_logger(__name__)
 
