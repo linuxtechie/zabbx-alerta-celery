@@ -1,0 +1,3 @@
+build/
+dist/
+zabbix_alerta_celery.egg-info/

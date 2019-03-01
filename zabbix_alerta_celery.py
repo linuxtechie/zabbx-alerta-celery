@@ -151,6 +151,69 @@ def parse_zabbix(subject, message):
 
   return alert
 
+def updateAlert(args, alert, LOG):
+  log = LOG.getLogger('pyzabbix')
+  log.setLevel(LOG.DEBUG)
+  zapi = ZabbixAPI(args.zbxurl)
+  zapi.session.verify = False
+  zapi.timeout = 300
+  zapi.login(args.zbxuser, args.zbxpassword)
+  
+  trigger = zapi.trigger.get(triggerids=alert['triggerId'], selectFunctions="extend", expandExpression=True)
+  if len(trigger) == 0: return alert
+  
+  # Get all the items in the trigger so that the event key can be formulated correctly.
+  trigger = trigger[0]
+  hostId = None
+  items = {}
+  for item in zapi.item.get(itemids=[item['itemid'] for item in trigger['functions']]):
+    hostId = item['hostid']
+    items[item['key_']]=item['itemid']
+    
+  # If the number of items in the trigger function is 0 then revert to the one sent in by Zabbix
+  if len(items) > 0: 
+    alert['event'] = "_".join(sorted(items.keys()))
+  
+  # If the severity is not OK then we pass the details as it is.
+  if alert['severity'] != 'OK': 
+    return alert
+  
+  num2Severity = {
+    '0':'Not classified',
+    '1':'Information',
+    '2':'Warning',
+    '3':'Average',
+    '4':'High',
+    '5':'Disaster'
+  }
+  
+  # Get any other triggers that exist for the same host, items, are being monitored and are in problem state
+  otherTrigger = zapi.trigger.get(
+    # Only get non templated triggers
+    monitored=True,
+    hostids=hostId, 
+    itemids=[items[key] for key in items.keys()],
+    expandExpression=True, 
+    # Only get those who are in problem state.
+    filter={'value':1}, 
+    sortfield="priority", 
+    sortorder="DESC",
+    # The old trigger shouldn't be older than 15 days.
+    lastChangeSince=trigger['lastchange']-1296000,
+    limit=1
+  )
+  if len(otherTrigger) > 0:
+    otherTrigger = otherTrigger[0]
+    foundAll = True
+    for item in items:
+      if item not in otherTrigger['expression']:
+        foundAll = False
+        break
+    if foundAll:
+      alert['severity'] = num2Severity[otherTrigger['priority']]
+      LOG.info("Modified Severity to: %s", alert['severity'])
+  return alert
+
 
 def main():
   config_file = os.environ.get('ALERTA_CONF_FILE') or OPTIONS['config_file']
@@ -228,39 +291,9 @@ def main():
 
   LOG.info("[alerta] endpoint=%s key=%s sendto=%s, summary=%s, body=%s", args.endpoint, args.key, args.sendto, args.summary, args.body)
   try:
-    # log = LOG.getLogger('pyzabbix')
-    # log.setLevel(LOG.DEBUG)
     alert = parse_zabbix(args.summary, args.body)
-    zapi = ZabbixAPI(args.zbxurl)
-    zapi.session.verify = False
-    zapi.timeout = 300
-    zapi.login(args.zbxuser, args.zbxpassword)
-    trigger = zapi.trigger.get(triggerids=alert['triggerId'], selectFunctions="extend", expandExpression=True)
-    hostId = None
-    items = {}
-    for item in zapi.item.get(itemids=[item['itemid'] for item in trigger[0]['functions']]):
-      hostId = item['hostid']
-      items[item['key_']]=item['itemid']
-    alert['event'] = "_".join(sorted(items.keys()))
-    if alert['severity'] == 'OK':
-      num2Severity = {
-        '0':'Not classified',
-        '1':'Information',
-        '2':'Warning',
-        '3':'Average',
-        '4':'High',
-        '5':'Disaster'
-      }
-      trigger = zapi.trigger.get(monitored=True, hostids=hostId, itemids=[items[key] for key in items.keys()],expandExpression=True, filter={'value':1}, sortfield="priority", sortorder="DESC", limit=1)
-      if len(trigger) > 0:
-        foundAll = True
-        for item in items:
-          if item not in trigger[0]['expression']:
-            foundAll = False
-            break
-        if foundAll:
-          alert['severity'] = num2Severity[trigger[0]['priority']]
-    # LOG.info("Sending to celery")
+    alert = updateAlert(args, alert, LOG)
+    LOG.info("Sending to celery")
     send2celery.apply_async(args = [args.endpoint, args.key, args.sslverify, alert], queue='zabbix_celery')
   except (SystemExit, KeyboardInterrupt):
     LOG.warning("Exiting zabbix-alerta.")
